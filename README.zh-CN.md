@@ -1,12 +1,12 @@
 # ESP32 SuperFlash
 
-[English](README.md)
+[English](README.md) | 简体中文
 
 ESP32 固件烧录工作台。使用 Rust、egui 和原生窗口，随应用分发 Espressif esptool 和文件系统生成器。打包后的应用可离线运行。
 
-![ESP32 SuperFlash 简体中文界面，显示数据分区设置、目录树和容量占用条](assets/screenshots/workbench-zh-CN.jpg)
-
-*macOS 下的数据分区烧录界面，使用 LittleFS 示例文件夹。*
+![SuperFlash Full firmware flash page](assets/screenshots/full_flash_zh-CN.png)
+![SuperFlash multi partition flash page](assets/screenshots/multi_partition_zh-CN.png)
+![SuperFlash multi partition flash page](assets/screenshots/data_partition_zh-CN.png)
 
 ## 工作台
 
@@ -54,9 +54,6 @@ CSV 留空偏移按 ESP-IDF 规则推算，默认分区表偏移为 `0x8000`。�
 - Linux 建议在 Ubuntu 22.04 或更新的目标系统打包。Ubuntu 构建依赖可用 `sudo apt install build-essential pkg-config libudev-dev libxkbcommon-dev libgl1-mesa-dev fontconfig` 安装。桌面需要 X11 或 Wayland、OpenGL 和可用的 XDG Desktop Portal 文件对话框。串口访问权限按发行版配置，例如 Ubuntu 的 `dialout` 组。解压后运行 `./ESP32-SuperFlash`，保留同级的 `tools`。
 - 首次准备后可用 `cargo run --locked` 启动开发版。每个包只复制本机对应的工具目录和共享字体。
 
-## 项目
-
-[github.com/tomosawa/esp32-superflash](https://github.com/tomosawa/esp32-superflash)
 
 ## 许可证与第三方版权说明
 

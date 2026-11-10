@@ -1,12 +1,12 @@
 # ESP32 SuperFlash
 
-[简体中文](README.zh-CN.md)
+English | [简体中文](README.zh-CN.md)
 
 ESP32 SuperFlash is a desktop tool for flashing ESP32 firmware and data partitions. It uses Rust and egui and bundles the tools needed to build images and flash them offline.
 
-![English SuperFlash workbench showing the data partition form, folder tree, and storage usage bar](assets/screenshots/workbench-en.jpg)
-
-*Data partition mode on macOS with a sample LittleFS folder.*
+![SuperFlash Full firmware flash page](assets/screenshots/full_flash_en.png)
+![SuperFlash multi partition flash page](assets/screenshots/multi_partition_en.png)
+![SuperFlash multi partition flash page](assets/screenshots/data_partition_en.png)
 
 ## Workbench
 
