@@ -113,6 +113,8 @@ pub const DEFAULT_DATA_SIZE: &str = "1M";
 #[serde(default)]
 pub struct DataConfig {
     pub folder: String,
+    pub use_raw_image: bool,
+    pub raw_image: String,
     pub address: String,
     pub size: String,
     pub format: FileSystem,
@@ -138,6 +140,8 @@ impl Default for DataConfig {
     fn default() -> Self {
         Self {
             folder: String::new(),
+            use_raw_image: false,
+            raw_image: String::new(),
             address: DEFAULT_DATA_ADDRESS.into(),
             size: DEFAULT_DATA_SIZE.into(),
             format: FileSystem::LittleFs,
@@ -451,13 +455,8 @@ pub fn inputs<'a>(
             meta.is_file() && meta.len() != 0,
             message("invalid_binary", &[&display])
         );
-        let mut prefix = [0u8; 16];
-        let n = std::io::Read::read(&mut fs::File::open(&path)?, &mut prefix)?;
-        let hex_input =
-            n >= 11 && prefix[0] == b':' && prefix[1..11].iter().all(u8::is_ascii_hexdigit);
-        let uf2_input = prefix.starts_with(b"UF2\nWQ]\x9e");
         ensure!(
-            !hex_input && !uf2_input,
+            !encoded_image(&mut fs::File::open(&path)?)?,
             message("invalid_binary", &[&display])
         );
         let offset = address(&segment.address).with_context(|| t("invalid_address"))?;
@@ -511,7 +510,17 @@ pub fn inputs<'a>(
     Ok(inputs)
 }
 
-pub fn data_partition(format: FileSystem, kind: &str) -> bool {
+pub fn encoded_image(reader: &mut impl std::io::Read) -> Result<bool> {
+    use std::io::Read as _;
+
+    let mut prefix = Vec::with_capacity(11);
+    reader.take(11).read_to_end(&mut prefix)?;
+    let hex =
+        prefix.len() == 11 && prefix[0] == b':' && prefix[1..].iter().all(u8::is_ascii_hexdigit);
+    Ok(hex || prefix.starts_with(b"UF2\nWQ]\x9e"))
+}
+
+pub fn data_partition(format: Option<FileSystem>, kind: &str) -> bool {
     let Some((kind, sub)) = kind.split_once('/') else {
         return false;
     };
@@ -519,10 +528,11 @@ pub fn data_partition(format: FileSystem, kind: &str) -> bool {
         return false;
     }
     match format {
-        FileSystem::LittleFs => {
+        Some(FileSystem::LittleFs) => {
             matches!(sub, "littlefs" | "spiffs") || matches!(number(sub).ok(), Some(0x82 | 0x83))
         }
-        FileSystem::FatFs => sub == "fat" || number(sub).ok() == Some(0x81),
-        FileSystem::Spiffs => sub == "spiffs" || number(sub).ok() == Some(0x82),
+        Some(FileSystem::FatFs) => sub == "fat" || number(sub).ok() == Some(0x81),
+        Some(FileSystem::Spiffs) => sub == "spiffs" || number(sub).ok() == Some(0x82),
+        None => true,
     }
 }

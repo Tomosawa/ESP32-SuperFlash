@@ -1003,6 +1003,41 @@ pub fn data_input(
     })
 }
 
+pub fn raw_data_input(
+    config: &DataConfig,
+    path: PathBuf,
+    options: &Connection,
+) -> Result<WriteInput> {
+    let capacity = number(&config.size).context(t("invalid_capacity"))?;
+    ensure!(
+        (4096..=256 * 1024 * 1024).contains(&capacity) && capacity % 4096 == 0,
+        t("invalid_capacity")
+    );
+    let partition = data_input(config, path, capacity, options)?;
+    let metadata = fs::metadata(&partition.path).context(t("invalid_path"))?;
+    ensure!(metadata.is_file() && metadata.len() > 0, t("invalid_path"));
+    ensure!(metadata.len() <= capacity, t("over_capacity"));
+    ensure!(
+        !model::encoded_image(&mut fs::File::open(&partition.path)?)?,
+        t("raw_image_encoding")
+    );
+    Ok(WriteInput {
+        size: metadata.len(),
+        ..partition
+    })
+}
+
+pub fn raw_data_command(
+    tools: &Tools,
+    options: &Connection,
+    input: WriteInput,
+) -> Result<Invocation> {
+    let mut options = options.clone();
+    // Keep the payload unchanged even when it resembles a bootloader image.
+    options.flash_size = "keep".into();
+    flash_command(tools, &options, &[input], true)
+}
+
 pub fn validate_image_destination(output: &Path, folder: &Path) -> Result<()> {
     let parent = output.parent().context(t("invalid_path"))?.canonicalize()?;
     ensure!(

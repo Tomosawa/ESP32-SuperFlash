@@ -7,6 +7,8 @@ use anyhow::{Context as _, Result};
 use eframe::egui::{self, Context};
 use std::{
     collections::VecDeque,
+    fs::File,
+    io::{self, Read as _},
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -51,7 +53,6 @@ pub struct App {
 #[serde(default)]
 pub struct Preferences {
     language: String,
-    pub guide: bool,
     pub advanced: bool,
     pub appearance: Appearance,
 }
@@ -60,7 +61,6 @@ impl Default for Preferences {
     fn default() -> Self {
         Self {
             language: String::new(),
-            guide: true,
             advanced: false,
             appearance: Appearance::System,
         }
@@ -133,6 +133,13 @@ pub enum Plan {
         display: String,
         summary: String,
     },
+    RawDataFlash {
+        config: Box<model::DataConfig>,
+        connection: model::Connection,
+        input_size: u64,
+        display: String,
+        summary: String,
+    },
     Merge {
         connection: model::Connection,
         inputs: Vec<model::WriteInput>,
@@ -149,7 +156,7 @@ impl Plan {
     fn title(&self) -> &'static str {
         match self {
             Self::Flash { .. } => t("flash_firmware"),
-            Self::DataFlash { .. } => t("flash_data"),
+            Self::DataFlash { .. } | Self::RawDataFlash { .. } => t("flash_data"),
             Self::Merge { .. } => t("merge"),
             Self::Build { .. } => t("build_image"),
         }
@@ -159,6 +166,9 @@ impl Plan {
         match self {
             Self::Flash { command, summary } => (summary, command.display()),
             Self::DataFlash {
+                display, summary, ..
+            }
+            | Self::RawDataFlash {
                 display, summary, ..
             } => (summary, display.clone()),
             _ => ("", String::new()),
@@ -180,6 +190,23 @@ impl Plan {
                 let input = engine::data_input(&config, image, size, &connection)?;
                 engine::flash_command(tools, &connection, &[input], true)?.run(ctx)?;
                 Ok(message("data_complete", &[&config.format.name()]))
+            }
+            Self::RawDataFlash {
+                config,
+                connection,
+                input_size,
+                ..
+            } => {
+                let dir = tempfile::tempdir()?;
+                let image = dir.path().join("raw-image.bin");
+                let source = File::open(&config.raw_image).context(t("invalid_path"))?;
+                anyhow::ensure!(source.metadata()?.is_file(), t("invalid_path"));
+                let copied =
+                    io::copy(&mut source.take(input_size + 1), &mut File::create(&image)?)?;
+                anyhow::ensure!(copied == input_size, t("raw_image_changed"));
+                let input = engine::raw_data_input(&config, image, &connection)?;
+                engine::raw_data_command(tools, &connection, input)?.run(ctx)?;
+                Ok(t("flash_complete").into())
             }
             Self::Merge {
                 connection,
@@ -453,6 +480,27 @@ impl App {
         let options = &self.project.connection;
         if self.project.mode == Mode::Data {
             let config = self.project.data.clone();
+            if config.use_raw_image {
+                let input =
+                    engine::raw_data_input(&config, PathBuf::from(&config.raw_image), options)?;
+                let name = input.path.file_name().unwrap_or_default().to_string_lossy();
+                let summary = format!(
+                    "{} {chip} · {port}\n{} · {name} · {} · {}",
+                    t("target"),
+                    t("raw_image"),
+                    model::hex(input.address),
+                    model::human_size(input.size)
+                );
+                let input_size = input.size;
+                let display = engine::raw_data_command(&self.tools, options, input)?.display();
+                return Ok(Plan::RawDataFlash {
+                    config: Box::new(config),
+                    connection: options.clone(),
+                    input_size,
+                    display,
+                    summary,
+                });
+            }
             let size = engine::data_size(&config)?;
             let preview = self
                 .preview
@@ -579,7 +627,9 @@ impl App {
         }
         let title = plan.title();
         self.flash_monitor = match &plan {
-            Plan::Flash { summary, .. } | Plan::DataFlash { summary, .. } => Some(FlashMonitor {
+            Plan::Flash { summary, .. }
+            | Plan::DataFlash { summary, .. }
+            | Plan::RawDataFlash { summary, .. } => Some(FlashMonitor {
                 summary: summary.clone(),
                 visible: true,
                 outcome: None,
@@ -672,8 +722,10 @@ impl App {
         {
             self.help_text = text;
         }
-        if self.project.mode == Mode::Data {
+        if self.project.mode == Mode::Data && !self.project.data.use_raw_image {
             self.tick_scan(ctx);
+        } else if self.scan.is_some() {
+            self.rescan();
         }
     }
 

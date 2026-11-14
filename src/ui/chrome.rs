@@ -210,13 +210,10 @@ fn menus(app: &mut App, ui: &mut Ui) {
 
     ui.add_enabled_ui(app.job.is_none(), |ui| {
         ui.menu_button(t("options_menu"), |ui| {
-            let guide = ui
-                .checkbox(&mut app.preferences.guide, t("guide"))
-                .changed();
-            let advanced = ui
+            if ui
                 .checkbox(&mut app.preferences.advanced, t("advanced"))
-                .changed();
-            if guide || advanced {
+                .changed()
+            {
                 app.save_preferences();
                 ui.close();
             }

@@ -35,13 +35,59 @@ fn idf_csv_import_aligns_blank_offsets_and_preserves_selected_files() -> Result<
             ("0x110000", "0x0F0000"),
         ]
     );
-    assert!(model::data_partition(FileSystem::LittleFs, &rows[4].kind));
+    assert!(model::data_partition(
+        Some(FileSystem::LittleFs),
+        &rows[4].kind
+    ));
     rows[3].path = "app.bin".into();
     rows[3].enabled = true;
     project.segments = rows;
     let rows = model::read_partitions(&csv, &project)?;
     assert_eq!(rows[3].path, "app.bin");
     assert!(rows[3].enabled);
+    Ok(())
+}
+
+#[test]
+fn raw_data_image_uses_file_length_and_keeps_data_flash_constraints() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("web assets.tar");
+    fs::write(&path, [0x42; 3000])?;
+    let mut config = DataConfig {
+        address: "0x200000".into(),
+        size: "4K".into(),
+        ..Default::default()
+    };
+    let mut options = Connection {
+        auto_port: true,
+        flash_size: "detect".into(),
+        ..Default::default()
+    };
+    let input = engine::raw_data_input(&config, path.clone(), &options)?;
+    assert_eq!(input.path, path);
+    assert_eq!(input.address, 0x200000);
+    assert_eq!(input.size, 3000);
+    let tools = Tools::locate();
+    let command = engine::raw_data_command(&tools, &options, input)?.display();
+    assert!(command.contains("'write-flash' '--' '0x200000'"));
+    assert!(command.contains("web assets.tar"));
+
+    options.erase_all = true;
+    let input = engine::raw_data_input(&config, path.clone(), &options)?;
+    assert!(engine::raw_data_command(&tools, &options, input).is_err());
+    options.flash_size = "2MB".into();
+    assert!(engine::raw_data_input(&config, path.clone(), &options).is_err());
+    options.flash_size = "keep".into();
+
+    config.address = "0x200001".into();
+    assert!(engine::raw_data_input(&config, path.clone(), &options).is_err());
+    config.address = "0x200000".into();
+    fs::write(&path, [0x42; 4097])?;
+    assert!(engine::raw_data_input(&config, path.clone(), &options).is_err());
+    fs::write(&path, b":00000001FF\n")?;
+    assert!(engine::raw_data_input(&config, path, &options).is_err());
+    assert!(model::data_partition(None, "data/0x40"));
+    assert!(!model::data_partition(None, "app/factory"));
     Ok(())
 }
 

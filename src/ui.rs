@@ -91,18 +91,10 @@ pub fn show(app: &mut App, ctx: &Context) {
                             .id_salt(mode_keys(app.project.mode).0)
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                let (title, description, guide) = mode_keys(app.project.mode);
+                                let (title, description) = mode_keys(app.project.mode);
                                 ui.heading(t(title));
-                                hint(ui, t(description));
-                                if app.preferences.guide {
-                                    Frame::new()
-                                        .fill(p.tint)
-                                        .corner_radius(9)
-                                        .inner_margin(Margin::same(10))
-                                        .show(ui, |ui| {
-                                            ui.set_min_width(ui.available_width());
-                                            ui.label(RichText::new(t(guide)).color(p.accent));
-                                        });
+                                if let Some(description) = description {
+                                    hint(ui, t(description));
                                 }
                                 ui.add_space(4.0);
                                 match app.project.mode {
@@ -120,11 +112,11 @@ pub fn show(app: &mut App, ctx: &Context) {
     chrome::resize_edges(ctx);
 }
 
-fn mode_keys(mode: Mode) -> (&'static str, &'static str, &'static str) {
+fn mode_keys(mode: Mode) -> (&'static str, Option<&'static str>) {
     match mode {
-        Mode::Firmware => ("firmware", "firmware_desc", "firmware_guide"),
-        Mode::Partitions => ("partitions", "partitions_desc", "partitions_guide"),
-        Mode::Data => ("data", "data_desc", "data_guide"),
+        Mode::Firmware => ("firmware", Some("firmware_desc")),
+        Mode::Partitions => ("partitions", Some("partitions_desc")),
+        Mode::Data => ("data", None),
     }
 }
 
@@ -429,27 +421,45 @@ fn partition_table(ui: &mut Ui, segments: &mut Vec<Segment>, advanced: bool) {
 
 fn data(app: &mut App, ui: &mut Ui) {
     card(ui, |ui| {
-        heading(ui, "source_folder");
-        let mut folder = std::mem::take(&mut app.project.data.folder);
-        let mut browse = false;
-        path_field(ui, &mut folder, "no_folder", "browse_folder", |_| {
-            browse = true;
-            false
-        });
-        app.project.data.folder = folder;
-        if browse {
-            app.choose_folder();
-        }
         ui.horizontal_wrapped(|ui| {
-            for format in [FileSystem::LittleFs, FileSystem::FatFs, FileSystem::Spiffs] {
-                if ui
-                    .add(Button::new(format.name()).selected(app.project.data.format == format))
-                    .clicked()
-                {
-                    app.project.data.format = format;
-                }
-            }
+            let raw = &mut app.project.data.use_raw_image;
+            ui.selectable_value(raw, false, t("source_folder"));
+            ui.selectable_value(raw, true, t("raw_image"));
         });
+        if app.project.data.use_raw_image {
+            let path = &mut app.project.data.raw_image;
+            path_field(ui, path, "no_file", "browse_file", |path| {
+                let Some(chosen) = app::dialog_at(path).pick_file() else {
+                    return false;
+                };
+                *path = chosen.to_string_lossy().into_owned();
+                true
+            });
+            if let Some(bytes) = file_size(path) {
+                hint(ui, &model::human_size(bytes));
+            }
+        } else {
+            let mut folder = std::mem::take(&mut app.project.data.folder);
+            let mut browse = false;
+            path_field(ui, &mut folder, "no_folder", "browse_folder", |_| {
+                browse = true;
+                false
+            });
+            app.project.data.folder = folder;
+            if browse {
+                app.choose_folder();
+            }
+            ui.horizontal_wrapped(|ui| {
+                for format in [FileSystem::LittleFs, FileSystem::FatFs, FileSystem::Spiffs] {
+                    if ui
+                        .add(Button::new(format.name()).selected(app.project.data.format == format))
+                        .clicked()
+                    {
+                        app.project.data.format = format;
+                    }
+                }
+            });
+        }
         ui.horizontal_wrapped(|ui| {
             field(
                 ui,
@@ -464,7 +474,14 @@ fn data(app: &mut App, ui: &mut Ui) {
                 model::DEFAULT_DATA_ADDRESS,
             );
         });
-        hint(ui, t("data_address_hint"));
+        hint(
+            ui,
+            t(if app.project.data.use_raw_image {
+                "raw_address_hint"
+            } else {
+                "data_address_hint"
+            }),
+        );
         ui.horizontal_wrapped(|ui| {
             csv_buttons(app, ui);
             let config = &mut app.project.data;
@@ -473,7 +490,10 @@ fn data(app: &mut App, ui: &mut Ui) {
                 .show_ui(ui, |ui| {
                     let mut found = false;
                     for row in &app.project.segments {
-                        if model::data_partition(config.format, &row.kind) {
+                        if model::data_partition(
+                            (!config.use_raw_image).then_some(config.format),
+                            &row.kind,
+                        ) {
                             found = true;
                             if ui
                                 .selectable_label(
@@ -498,6 +518,9 @@ fn data(app: &mut App, ui: &mut Ui) {
             });
         }
     });
+    if app.project.data.use_raw_image {
+        return;
+    }
     if !app.project.data.folder.is_empty() {
         storage(app, ui);
     }
@@ -678,9 +701,6 @@ fn actions(app: &mut App, ctx: &Context, ui: &mut Ui) {
     ui.add_enabled_ui(app.job.is_none(), |ui| {
         card(ui, |ui| {
             heading(ui, "device");
-            if app.preferences.guide && app.project.mode != Mode::Firmware {
-                hint(ui, t("usb_hint"));
-            }
             ui.horizontal(|ui| {
                 ui.label(t("serial_port"));
                 if ui.add(Icon::Refresh.button(t("refresh"))).clicked() {
@@ -764,7 +784,9 @@ fn actions(app: &mut App, ctx: &Context, ui: &mut Ui) {
                     ui.colored_label(p.error, &app.activity);
                 });
         }
-        if app.project.mode != Mode::Firmware {
+        if app.project.mode == Mode::Partitions
+            || (app.project.mode == Mode::Data && !app.project.data.use_raw_image)
+        {
             export_card(app, ctx, ui);
         }
         card(ui, |ui| {
@@ -785,7 +807,12 @@ fn source_selected(app: &App, flash: bool) -> bool {
             .any(|row| row.enabled && !row.path.trim().is_empty()),
         Mode::Data => {
             let data = &app.project.data;
-            !data.folder.trim().is_empty()
+            let source = if data.use_raw_image {
+                &data.raw_image
+            } else {
+                &data.folder
+            };
+            !source.trim().is_empty()
                 && !data.size.trim().is_empty()
                 && (!flash || !data.address.trim().is_empty())
         }
